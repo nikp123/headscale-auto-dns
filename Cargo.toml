@@ -1,0 +1,32 @@
+[package]
+name = "headscale-auto-dns"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.11.1"
+
+# For error backtraces
+anyhow = "1.0.98"
+
+# Custom error types
+thiserror = "2.0.12"
+
+# Get commandline flags
+dotenv = "0.15.0"
+clap = { version = "4.5.36", features = [ "cargo", "env", "derive" ] }
+
+# Get system time (in the correct format)
+chrono = "0.4.40"
+
+# Do HTTPing
+reqwest = { version = "0.12.15", features = [ "blocking" ] }
+
+# Encode/decode data
+base64 = "0.22.1"
+
+# Spek JSON
+serde = { version = "1.0.219", features = [ "derive" ] }
+serde_json = "1.0.140"
+serde-aux = "4.6.0"
+#log = "0.4.27"
