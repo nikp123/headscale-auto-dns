@@ -6,7 +6,7 @@ use serde::{Serialize};
 use std::rc::Rc;
 use anyhow::{Result, Context};
 use regex::Regex;
-use crate::headscale::{HeadscaleClient, HeadscaleNode, HeadscaleUser};
+use crate::headscale::{headscale_user_list_contains_a_user, HeadscaleClient, HeadscaleNode, HeadscaleUser};
 use crate::traefik::{TraefikAPIClient, TraefikAPIClientDetails, TraefikRouter};
 
 #[derive(Parser)]
@@ -41,12 +41,21 @@ The blacklist is processed last."#)]
         help = r#"Path where the generated json extra_records.json will be written to.
 Make sure you configure Headscale to read from this path."#, default_value = "extra_records.json")]
     output_path: String,
+
+    #[arg(long = "headscale_old_magicdns", alias = "hs_olddns", env = "HEADSCALE_OLD_MAGICDNS",
+        help = r#"Provide old magicDNS functionality to Headscale,
+ie. the old `node.user.base_domain` format"#, default_value_t = true)]
+    old_magicdns: bool,
 }
 
 // values that are expected to change during runtime
 struct ProcessingVolatile {
-    headscale_users: Vec<HeadscaleUser>,
+    // Caution! This includes all headscale nodes, including the ones not used by Treafik!
+    // This is required for the old magicDNS functionality to do it's thing
     headscale_nodes: Vec<Rc<HeadscaleNode>>,
+    // This ONLY includes users that are searched for when searching for Traefik endpoints,
+    // may be changed in the future to behave in the same way as nodes does.
+    headscale_users: Vec<HeadscaleUser>,
     traefik_clients: Vec<(TraefikAPIClient, Rc<HeadscaleNode>)>,
     traefik_router:  Vec<(TraefikRouter,    Rc<HeadscaleNode>)>,
 }
@@ -102,28 +111,35 @@ impl Processing {
             self.volatile.headscale_users.retain(|x| self.setup.allowed_users.contains(&x.name));
         }
 
-        // get the raw list of headscale nodes
-        let mut headscale_nodes = self.headscale_client
-            .get_node_list_with_addresses(Some(&self.volatile.headscale_users))?;
+        // Get the list of all Headscale nodes
+        let all_headscale_nodes = self.headscale_client.get_node_list_with_addresses()?;
 
-        // filter out any undesired nodes
-        if self.setup.node_blacklist.len() > 0 {
-            headscale_nodes.retain(|x| !self.setup.node_blacklist.contains(&x.given_name));
-        }
-
-        // convert into a reference counted list because we need to ensure the safety of references
-        self.volatile.headscale_nodes = headscale_nodes.into_iter()
+        // Turn it into a reference counted list
+        self.volatile.headscale_nodes = all_headscale_nodes.into_iter()
             .map(|x| Rc::new(x)).collect();
 
-        self.volatile.traefik_clients = Vec::new();
+        // Create a second list that only contains a list of nodes that are
+        // in the interest of Traefik only
+        let mut traefik_only_node_list: Vec<Rc<HeadscaleNode>> = self.volatile.headscale_nodes.iter()
+            .filter(|&x| headscale_user_list_contains_a_user(
+                        &self.volatile.headscale_users, x.user.name.as_str()
+            )).map(|x| Rc::clone(x)).collect();
 
-        for i in &self.volatile.headscale_nodes {
+        // Filter out any undesired nodes
+        if self.setup.node_blacklist.len() > 0 {
+            traefik_only_node_list.retain(|x| !self.setup.node_blacklist.contains(&x.given_name));
+        }
+
+        // Generate a list of Traefik clients using the the smaller list we just made
+        self.volatile.traefik_clients = Vec::new();
+        for i in traefik_only_node_list {
             let details = TraefikAPIClientDetails::from_custom_host(
-                i.get_magic_domain(&self.headscale_client).as_str()
+                // either way, IPv4 or IPv6 would work here so we don't really care
+                i.ip_addresses[0].as_str()
             )?;
             let client = TraefikAPIClient::from(&details)?;
 
-            self.volatile.traefik_clients.push((client, Rc::clone(i)));
+            self.volatile.traefik_clients.push((client, Rc::clone(&i)));
         }
 
         Ok(())
@@ -223,6 +239,21 @@ impl Processing {
                     }
 
                     dns_entries.push(dns_entry);
+                }
+            }
+        }
+        
+        // subroutine that adds the magicDNS domains
+        if self.setup.old_magicdns {
+            for i in &self.volatile.headscale_nodes {
+                for j in &i.ip_addresses {
+                    for k in i.get_magic_dns_domains(&self.headscale_client) {
+                        dns_entries.push(HeadscaleDNSEntry{
+                            name: k,
+                            record_type: if j.contains(':') { "AAAA".to_string() } else { "A".to_string() },
+                            value: j.clone(),
+                        });
+                    }
                 }
             }
         }

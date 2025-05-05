@@ -20,9 +20,10 @@ struct HeadscaleClientDetails {
 
     #[arg(long = "headscale_tld", alias = "hs_t", env = "HEADSCALE_TLD",
         help = r#"Headscale server's magicDNS's root level TLD (eg. something."tailscale")"#,
-        default_value = "tailscale")]
-    magic_tld: String,
+        default_values_t = vec!["tailscale".to_string()], value_delimiter = ',')]
+    magic_tld: Vec<String>,
 }
+
 impl HeadscaleClientDetails {
     // We will skip validation in the config parser stage as we cannot do that
     // without setting up the client first
@@ -38,36 +39,11 @@ pub struct HeadscaleClient {
 
     // We need this in here because Headscale offers no API to access this information
     // as far as I've noticed
-    magic_tld: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct HeadscaleUser {
-    //#[serde(deserialize_with = "deserialize_number_from_string")]
-    //id:   u32,
-    pub(crate) name: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct HeadscaleNode {
-    //#[serde(deserialize_with = "deserialize_number_from_string")]
-    //pub id:           u32,
-    pub ip_addresses: Vec<String>,   // CIDR notation
-    //pub name:         String,      // node's own hostname
-    pub given_name:   String,        // magicDNS machine name
-    pub user:         HeadscaleUser,
-    //online:           bool,
-}
-
-impl HeadscaleNode {
-    pub fn get_magic_domain(&self, client: &HeadscaleClient) -> String {
-        self.given_name.clone() + "." + self.user.name.as_str() + "." + client.get_magic_tld().as_str()
-    }
+    magic_tld: Vec<String>,
 }
 
 impl HeadscaleClient {
-    pub fn get_magic_tld(&self) -> String {
+    pub fn get_magic_tld(&self) -> Vec<String> {
         self.magic_tld.clone()
     }
 
@@ -122,10 +98,7 @@ impl HeadscaleClient {
 
         Ok(from_str::<UserResponse>(&res.text()?)?.users)
     }
-    pub fn get_node_list_with_addresses(
-        &self,
-        desired_users: Option<&Vec<HeadscaleUser>>
-    ) -> Result<Vec<HeadscaleNode>> {
+    pub fn get_node_list_with_addresses(&self) -> Result<Vec<HeadscaleNode>> {
         let urls = vec![Url::parse(&(self.base_url.to_string() + "/api/v1/node"))?];
         #[derive(Deserialize, Debug)]
         struct NodeResponse {
@@ -143,19 +116,40 @@ impl HeadscaleClient {
             }
         ).collect::<Vec<_>>().concat();
 
-        Ok(match desired_users {
-            Some(desired_users) => {
-                let mut users: Vec<String> = Vec::new();
+        Ok(nodes)
+    }
+}
 
-                desired_users.into_iter().for_each(|user| {
-                    users.push(user.name.clone());
-                });
 
-                nodes.into_iter().filter(|node| {
-                    users.contains(&node.user.name)
-                }).collect::<Vec<_>>()
-            }
-            None => nodes,
-        })
+#[derive(PartialEq, Deserialize, Debug, Clone)]
+pub struct HeadscaleUser {
+    //#[serde(deserialize_with = "deserialize_number_from_string")]
+    //id:   u32,
+    pub(crate) name: String,
+}
+
+pub fn headscale_user_list_contains_a_user(list: &Vec<HeadscaleUser>, user: &str) -> bool {
+    for i in list { if i.name == user { return true; } }
+    false
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadscaleNode {
+    //#[serde(deserialize_with = "deserialize_number_from_string")]
+    //pub id:           u32,
+    pub ip_addresses: Vec<String>,   // CIDR notation
+    //pub name:         String,      // node's own hostname
+    pub given_name:   String,        // magicDNS machine name
+    pub user:         HeadscaleUser,
+    //online:           bool,
+}
+
+impl HeadscaleNode {
+    pub fn get_magic_dns_domains(&self, client: &HeadscaleClient) -> Vec<String> {
+        client.get_magic_tld().into_iter()
+            .map(|x| 
+                self.given_name.clone() + "." + self.user.name.as_str() + "." + x.as_str())
+            .collect()
     }
 }

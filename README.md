@@ -10,20 +10,27 @@ This presents a problem because Headscale offers no API for configuring DNS entr
 thus requiring a config file change by default. This is slow and cumbersome, hence I built a tool
 that deals with this problem instead.
 
+A bonus feature of this thing is that I made it so it can generate the old-format long magicDNS 
+domains as well. I really wanted this back so I added them back. It doesn't let you have
+short magicDNS domains though, that'd require modifications on the coordination server side
+which we don't have with this tool anymore.
+
 Modus operandi
 ----------
 
 Essentially it does what it says on the tin:
 1. Connects to your headscale server
-2. Asks it what users exist, throws out undesired users
-3. Asks what nodes belong to those users and throws out undesired nodes as well
+2. Asks it what users exist (ignores the ones not used for Traefik)
+3. Asks what nodes belong to those users and ignores nodes not used by Traefik
 4. Using that huge list of nodes it creates an Treafik API client for each and
 asks each API client what routes exist on those Traefik servers.
 5. Using the route list it figures out what domains exist and filters out them
 accordingly as well. 
 6. The ones remaning are combined with their IP addresses obtained through Headscale
 and generated into a list of domain records for Headscale to read.
-7. Yay, magic.
+7. (If you've enabled old magicDNS functionality) Also generates a list of 
+(node.user.tld) domains using the information obtained from the Headscale server. 
+8. Yay, magic.
 
 Other motivations
 ----------
