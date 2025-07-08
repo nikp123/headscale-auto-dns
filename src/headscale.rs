@@ -142,7 +142,7 @@ pub struct HeadscaleNode {
     //pub name:         String,      // node's own hostname
     pub given_name:   String,        // magicDNS machine name
     pub user:         HeadscaleUser,
-    //online:           bool,
+    pub online:       bool,
 }
 
 impl HeadscaleNode {

@@ -119,11 +119,11 @@ impl Processing {
             .map(|x| Rc::new(x)).collect();
 
         // Create a second list that only contains a list of nodes that are
-        // in the interest of Traefik only
+        // in the interest of Traefik only and drop the ones that are offline
         let mut traefik_only_node_list: Vec<Rc<HeadscaleNode>> = self.volatile.headscale_nodes.iter()
             .filter(|&x| headscale_user_list_contains_a_user(
                         &self.volatile.headscale_users, x.user.name.as_str()
-            )).map(|x| Rc::clone(x)).collect();
+            ) && x.online).map(|x| Rc::clone(x)).collect();
 
         // Filter out any undesired nodes
         if self.setup.node_blacklist.len() > 0 {
